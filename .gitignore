@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+*.wav
+*.mp3
+output/
+
+# Model weights (downloaded separately)
+bangla_tts/
+arabic_tts/
+klaam/
+tts-arabic-tacotron2/
+
+# Temporary files
+*.tmp
+*.log
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/

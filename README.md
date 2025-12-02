@@ -1,3 +1,84 @@
+# Comprehensive Bangla TTS
+
+## 🚀 Quick Start (Ubuntu 24 with GPU)
+
+This repository now includes standalone Python scripts optimized for Ubuntu 24 (Noble) with NVIDIA GPU support (tested with RTX 5060Ti 16GB).
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/mobassir94/comprehensive-bangla-tts.git
+cd comprehensive-bangla-tts
+
+# Run the installation script (Ubuntu 24)
+chmod +x install.sh
+./install.sh
+
+# Or install manually:
+# 1. Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install PyTorch with CUDA 12.4 support (for RTX 50 series)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# 3. Install dependencies
+pip install -r requirements.txt
+```
+
+### Basic Usage
+
+```bash
+# Check GPU availability
+python bangla_tts.py --check-gpu
+
+# Synthesize speech with male voice
+python bangla_tts.py --text "আমার সোনার বাংলা, আমি তোমায় ভালোবাসি" --output output.wav
+
+# Synthesize speech with female voice
+python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
+
+# Voice cloning
+python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
+
+# List available models
+python bangla_tts.py --list-models
+```
+
+### Python API Usage
+
+```python
+from bangla_tts import synthesize_speech, check_gpu_availability
+
+# Check GPU
+device = check_gpu_availability()
+
+# Synthesize speech
+synthesize_speech(
+    text="আমার সোনার বাংলা, আমি তোমায় ভালোবাসি",
+    output_path="output.wav",
+    voice="male",
+    use_gpu=True
+)
+```
+
+### Files Added
+
+| File | Description |
+|------|-------------|
+| `bangla_tts.py` | Main CLI script for Bangla TTS with GPU support |
+| `multilingual_tts_gpu.py` | Advanced multilingual (Bangla+Arabic) TTS with GPU optimization |
+| `requirements.txt` | Python dependencies for Ubuntu 24 with CUDA support |
+| `install.sh` | Automated installation script for Ubuntu 24 |
+
+### GPU Requirements
+
+- NVIDIA GPU with CUDA support (tested with RTX 5060Ti 16GB)
+- Ubuntu 24 (Noble) or later
+- NVIDIA Driver 550+ with CUDA 12.4+
+
+---
 
 # *****UPDATE-2 (8/24/2023)*****
 

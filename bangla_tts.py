@@ -2,16 +2,19 @@
 """
 Bangla Text-to-Speech (TTS) - Standalone Python Script
 Converted from Jupyter notebooks for standalone use.
-Optimized for Ubuntu 24 (Noble) with NVIDIA GPU support (RTX 5060Ti 16GB).
+Supports NVIDIA GPU acceleration.
 
 Usage:
     python bangla_tts.py --text "আমার সোনার বাংলা" --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice male --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
-    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output output.wav
     
-    # Using custom local model weights (for phoneme-based VITS model)
+    # Using custom local model weights (preserves trained voice and speech patterns)
     python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
+    
+    # Voice conversion with FreeVC (converts voice to match reference speaker)
+    # Note: This loses the custom model's trained speech patterns
+    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output output.wav
 """
 
 import argparse
@@ -98,7 +101,9 @@ def synthesize_speech(
         text: Bangla text to convert to speech
         output_path: Path to save the output audio file
         voice: Voice type ('male' or 'female') - used only when model_path is not provided
-        speaker_wav: Path to speaker audio for voice cloning (optional)
+        speaker_wav: Path to speaker audio for voice conversion using FreeVC (optional).
+            Note: When using custom model (model_path), voice conversion will lose
+            the trained speech patterns. Use this only to match a different speaker's voice.
         use_gpu: Whether to use GPU acceleration
         model_path: Path to custom model checkpoint file (optional)
         config_path: Path to custom model config file (optional)
@@ -123,11 +128,25 @@ def synthesize_speech(
     # Determine if we should use GPU
     use_cuda = use_gpu and torch.cuda.is_available()
     
+    if use_cuda:
+        logger.info("GPU acceleration ENABLED")
+    else:
+        logger.info("GPU acceleration DISABLED - using CPU")
+    
     # Validate speaker_wav if provided
     if speaker_wav and not os.path.exists(speaker_wav):
         logger.error(f"Speaker wav file not found: {speaker_wav}")
         logger.error("Please provide a valid path to the speaker audio file for voice cloning.")
         sys.exit(1)
+    
+    # Warn if using voice conversion with custom model
+    if speaker_wav and model_path:
+        logger.warning("=" * 60)
+        logger.warning("WARNING: Using voice conversion (--voice-clone) with custom model")
+        logger.warning("This will apply FreeVC voice conversion, which may lose the")
+        logger.warning("trained speech patterns from your custom model.")
+        logger.warning("If you want to preserve your model's voice, remove --voice-clone")
+        logger.warning("=" * 60)
     
     # Load TTS model
     if model_path and config_path:
@@ -141,6 +160,7 @@ def synthesize_speech(
         
         logger.info(f"Loading custom TTS model from: {model_path}")
         logger.info(f"Using config: {config_path}")
+        logger.info("Custom model will use its trained voice and speech patterns")
         tts = TTS(model_path=model_path, config_path=config_path, gpu=use_cuda)
     else:
         # Use pre-trained model from coqui-ai model zoo
@@ -156,15 +176,17 @@ def synthesize_speech(
     logger.info(f"Synthesizing speech for text: {text[:50]}...")
     
     if speaker_wav:
-        # Voice cloning mode - speaker_wav is validated to exist above
-        logger.info(f"Using voice cloning with speaker: {speaker_wav}")
+        # Voice conversion mode using FreeVC - speaker_wav is validated to exist above
+        logger.info(f"Using FreeVC voice conversion with speaker: {speaker_wav}")
+        logger.info("Note: This converts voice to match reference speaker (may lose trained patterns)")
         tts.tts_with_vc_to_file(
             text=text,
             speaker_wav=speaker_wav,
             file_path=output_path
         )
     else:
-        # Standard TTS mode
+        # Standard TTS mode - uses model's native trained voice
+        logger.info("Using model's native voice (no voice conversion)")
         tts.tts_to_file(text=text, file_path=output_path)
     
     logger.info(f"Audio saved to: {output_path}")
@@ -178,20 +200,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Basic usage with male voice
+    # Basic usage with male voice (uses pre-trained coqui-ai model)
     python bangla_tts.py --text "আমার সোনার বাংলা" --output output.wav
 
     # Use female voice
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
 
-    # Voice cloning with target speaker
-    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
-
-    # Using custom local model weights (e.g., phoneme-based VITS)
+    # Using custom local model weights (RECOMMENDED for trained models)
+    # This preserves your model's trained voice and speech patterns
     python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
 
-    # Custom model with voice cloning
-    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --voice-clone target_speaker_male.wav --output cloned.wav
+    # Voice conversion with FreeVC (converts to match reference speaker)
+    # WARNING: This may lose trained speech patterns from custom models
+    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output cloned.wav
 
     # Force CPU usage
     python bangla_tts.py --text "আমার সোনার বাংলা" --no-gpu --output output.wav
@@ -226,13 +247,13 @@ Examples:
         "--voice-clone", "-vc",
         type=str,
         dest="speaker_wav",
-        help="Path to speaker audio file for voice cloning"
+        help="Path to speaker audio for FreeVC voice conversion. WARNING: This converts voice to match reference speaker and may lose trained speech patterns from custom models"
     )
     
     parser.add_argument(
         "--model-path", "-m",
         type=str,
-        help="Path to custom model checkpoint file (for loading local weights)"
+        help="Path to custom model checkpoint file. Uses trained voice/speech patterns directly"
     )
     
     parser.add_argument(

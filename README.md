@@ -39,26 +39,33 @@ python bangla_tts.py --text "আমার সোনার বাংলা, আ�
 # Synthesize speech with female voice
 python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
 
-# Voice cloning with target speaker audio
-python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
-
 # List available models
 python bangla_tts.py --list-models
 ```
 
 ### Using Custom Local Model Weights
 
-If you have custom trained model weights (e.g., phoneme-based VITS model from Kaggle), you can load them directly:
+> **Recommended for custom trained models** - This preserves your model's trained voice and speech patterns.
+
+If you have custom trained model weights (e.g., phoneme-based VITS model from Kaggle), load them directly:
 
 ```bash
-# Using custom model checkpoint and config
+# Using custom model checkpoint and config - preserves trained voice/speech patterns
 python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
-
-# Custom model with voice cloning
-python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --voice-clone target_speaker_male.wav --output cloned.wav
 ```
 
 **Note:** Custom model weights can be downloaded from [Kaggle](https://www.kaggle.com/datasets/mobassir/comprehensive-bangla-tts).
+
+### Voice Conversion with FreeVC (Optional)
+
+The `--voice-clone` option uses FreeVC to convert the synthesized voice to match a reference speaker:
+
+```bash
+# Voice conversion - converts voice to match reference speaker
+python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
+```
+
+⚠️ **WARNING:** Using `--voice-clone` with custom models will apply FreeVC voice conversion, which may **lose the trained speech patterns** from your custom model. If your custom model already has the voice you want, **do NOT use `--voice-clone`**.
 
 ### Python API Usage
 
@@ -68,6 +75,16 @@ from bangla_tts import synthesize_speech, check_gpu_availability
 # Check GPU
 device = check_gpu_availability()
 
+# Synthesize speech with custom local model weights (RECOMMENDED)
+# Preserves trained voice and speech patterns
+synthesize_speech(
+    text="আমার নাম কি",
+    output_path="output.wav",
+    model_path="checkpoint.pth",
+    config_path="config.json",
+    use_gpu=True
+)
+
 # Synthesize speech (using pre-trained model from coqui-ai)
 synthesize_speech(
     text="আমার সোনার বাংলা, আমি তোমায় ভালোবাসি",
@@ -76,21 +93,12 @@ synthesize_speech(
     use_gpu=True
 )
 
-# Synthesize speech with voice cloning
+# Voice conversion with FreeVC (may lose trained speech patterns)
 synthesize_speech(
     text="আমার সোনার বাংলা",
     output_path="cloned.wav",
     voice="male",
     speaker_wav="target_speaker_male.wav",
-    use_gpu=True
-)
-
-# Synthesize speech with custom local model weights
-synthesize_speech(
-    text="আমার নাম কি",
-    output_path="output.wav",
-    model_path="checkpoint.pth",
-    config_path="config.json",
     use_gpu=True
 )
 ```

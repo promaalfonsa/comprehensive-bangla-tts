@@ -36,6 +36,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def setup_gpu_memory_allocation():
+    """Configure GPU to allocate maximum VRAM for better performance."""
+    if not TORCH_AVAILABLE or not torch.cuda.is_available():
+        return
+    
+    try:
+        # Set CUDA to maximize performance
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
+        
+        # Pre-allocate GPU memory to reserve the memory pool
+        device = torch.device("cuda:0")
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        
+        # Try to allocate ~90% of available VRAM to reserve the memory pool
+        target_allocation = int(total_memory * 0.90)
+        try:
+            # Allocate in chunks to avoid OOM
+            chunk_size = 256 * 1024 * 1024  # 256 MB chunks
+            tensors = []
+            allocated = 0
+            while allocated < target_allocation:
+                try:
+                    t = torch.empty(chunk_size // 4, dtype=torch.float32, device=device)
+                    tensors.append(t)
+                    allocated += chunk_size
+                except RuntimeError:
+                    break
+            
+            # Keep track of allocated amount before freeing
+            reserved_amount = allocated
+            
+            # Free the tensors - the memory pool remains reserved by PyTorch
+            # Note: We do NOT call empty_cache() to keep the memory pool allocated
+            del tensors
+            
+            logger.info(f"GPU memory pool initialized (~{reserved_amount / (1024**3):.2f} GB reserved)")
+        except Exception as e:
+            logger.warning(f"Could not pre-allocate GPU memory: {e}")
+        
+    except Exception as e:
+        logger.warning(f"GPU memory optimization setup failed: {e}")
+
+
 def check_gpu_availability():
     """Check and display GPU availability and configuration."""
     if not TORCH_AVAILABLE:
@@ -64,11 +108,15 @@ def check_gpu_availability():
         logger.info(f"CUDA Version: {torch.version.cuda}")
         logger.info(f"PyTorch Version: {torch.__version__}")
         
-        # Memory info
+        # Setup GPU memory allocation for maximum utilization
+        setup_gpu_memory_allocation()
+        
+        # Memory info after allocation
         if gpu_count > 0:
             allocated = torch.cuda.memory_allocated(0) / (1024**3)
             cached = torch.cuda.memory_reserved(0) / (1024**3)
-            logger.info(f"GPU Memory - Allocated: {allocated:.2f} GB, Cached: {cached:.2f} GB")
+            total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            logger.info(f"GPU Memory - Allocated: {allocated:.2f} GB, Reserved: {cached:.2f} GB, Total: {total:.2f} GB")
     else:
         logger.warning("CUDA is not available. Using CPU (this will be slower).")
         device = torch.device("cpu")

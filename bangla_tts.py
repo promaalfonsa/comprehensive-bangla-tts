@@ -2,12 +2,18 @@
 """
 Bangla Text-to-Speech (TTS) - Standalone Python Script
 Converted from Jupyter notebooks for standalone use.
-Optimized for Ubuntu 24 (Noble) with NVIDIA GPU support (RTX 5060Ti 16GB).
+Supports NVIDIA GPU acceleration.
 
 Usage:
     python bangla_tts.py --text "আমার সোনার বাংলা" --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice male --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
+    
+    # Using custom local model weights (preserves trained voice and speech patterns)
+    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
+    
+    # Voice conversion with FreeVC (converts voice to match reference speaker)
+    # Note: This loses the custom model's trained speech patterns
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output output.wav
 """
 
@@ -28,6 +34,50 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def setup_gpu_memory_allocation():
+    """Configure GPU to allocate maximum VRAM for better performance."""
+    if not TORCH_AVAILABLE or not torch.cuda.is_available():
+        return
+    
+    try:
+        # Set CUDA to maximize performance
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
+        
+        # Pre-allocate GPU memory to reserve the memory pool
+        device = torch.device("cuda:0")
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        
+        # Try to allocate ~90% of available VRAM to reserve the memory pool
+        target_allocation = int(total_memory * 0.90)
+        try:
+            # Allocate in chunks to avoid OOM
+            chunk_size = 256 * 1024 * 1024  # 256 MB chunks
+            tensors = []
+            allocated = 0
+            while allocated < target_allocation:
+                try:
+                    t = torch.empty(chunk_size // 4, dtype=torch.float32, device=device)
+                    tensors.append(t)
+                    allocated += chunk_size
+                except RuntimeError:
+                    break
+            
+            # Keep track of allocated amount before freeing
+            reserved_amount = allocated
+            
+            # Free the tensors - the memory pool remains reserved by PyTorch
+            # Note: We do NOT call empty_cache() to keep the memory pool allocated
+            del tensors
+            
+            logger.info(f"GPU memory pool initialized (~{reserved_amount / (1024**3):.2f} GB reserved)")
+        except Exception as e:
+            logger.warning(f"Could not pre-allocate GPU memory: {e}")
+        
+    except Exception as e:
+        logger.warning(f"GPU memory optimization setup failed: {e}")
 
 
 def check_gpu_availability():
@@ -58,11 +108,15 @@ def check_gpu_availability():
         logger.info(f"CUDA Version: {torch.version.cuda}")
         logger.info(f"PyTorch Version: {torch.__version__}")
         
-        # Memory info
+        # Setup GPU memory allocation for maximum utilization
+        setup_gpu_memory_allocation()
+        
+        # Memory info after allocation
         if gpu_count > 0:
             allocated = torch.cuda.memory_allocated(0) / (1024**3)
             cached = torch.cuda.memory_reserved(0) / (1024**3)
-            logger.info(f"GPU Memory - Allocated: {allocated:.2f} GB, Cached: {cached:.2f} GB")
+            total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            logger.info(f"GPU Memory - Allocated: {allocated:.2f} GB, Reserved: {cached:.2f} GB, Total: {total:.2f} GB")
     else:
         logger.warning("CUDA is not available. Using CPU (this will be slower).")
         device = torch.device("cpu")
@@ -84,7 +138,9 @@ def synthesize_speech(
     output_path: str = "output.wav",
     voice: str = "male",
     speaker_wav: str = None,
-    use_gpu: bool = True
+    use_gpu: bool = True,
+    model_path: str = None,
+    config_path: str = None
 ):
     """
     Synthesize speech from Bangla text.
@@ -92,9 +148,13 @@ def synthesize_speech(
     Args:
         text: Bangla text to convert to speech
         output_path: Path to save the output audio file
-        voice: Voice type ('male' or 'female')
-        speaker_wav: Path to speaker audio for voice cloning (optional)
+        voice: Voice type ('male' or 'female') - used only when model_path is not provided
+        speaker_wav: Path to speaker audio for voice conversion using FreeVC (optional).
+            Note: When using custom model (model_path), voice conversion will lose
+            the trained speech patterns. Use this only to match a different speaker's voice.
         use_gpu: Whether to use GPU acceleration
+        model_path: Path to custom model checkpoint file (optional)
+        config_path: Path to custom model config file (optional)
     
     Returns:
         Path to the generated audio file
@@ -116,30 +176,65 @@ def synthesize_speech(
     # Determine if we should use GPU
     use_cuda = use_gpu and torch.cuda.is_available()
     
-    # Get model name
-    models = get_available_models()
-    if voice not in models:
-        logger.error(f"Invalid voice '{voice}'. Available voices: {list(models.keys())}")
+    if use_cuda:
+        logger.info("GPU acceleration ENABLED")
+    else:
+        logger.info("GPU acceleration DISABLED - using CPU")
+    
+    # Validate speaker_wav if provided
+    if speaker_wav and not os.path.exists(speaker_wav):
+        logger.error(f"Speaker wav file not found: {speaker_wav}")
+        logger.error("Please provide a valid path to the speaker audio file for voice cloning.")
         sys.exit(1)
     
-    model_name = models[voice]
-    logger.info(f"Loading TTS model: {model_name}")
+    # Warn if using voice conversion with custom model
+    if speaker_wav and model_path:
+        logger.warning("=" * 60)
+        logger.warning("WARNING: Using voice conversion (--voice-clone) with custom model")
+        logger.warning("This will apply FreeVC voice conversion, which may lose the")
+        logger.warning("trained speech patterns from your custom model.")
+        logger.warning("If you want to preserve your model's voice, remove --voice-clone")
+        logger.warning("=" * 60)
     
-    # Initialize TTS with GPU support if available
-    tts = TTS(model_name=model_name, gpu=use_cuda)
+    # Load TTS model
+    if model_path and config_path:
+        # Use custom local model weights
+        if not os.path.exists(model_path):
+            logger.error(f"Model checkpoint file not found: {model_path}")
+            sys.exit(1)
+        if not os.path.exists(config_path):
+            logger.error(f"Model config file not found: {config_path}")
+            sys.exit(1)
+        
+        logger.info(f"Loading custom TTS model from: {model_path}")
+        logger.info(f"Using config: {config_path}")
+        logger.info("Custom model will use its trained voice and speech patterns")
+        tts = TTS(model_path=model_path, config_path=config_path, gpu=use_cuda)
+    else:
+        # Use pre-trained model from coqui-ai model zoo
+        models = get_available_models()
+        if voice not in models:
+            logger.error(f"Invalid voice '{voice}'. Available voices: {list(models.keys())}")
+            sys.exit(1)
+        
+        model_name = models[voice]
+        logger.info(f"Loading TTS model: {model_name}")
+        tts = TTS(model_name=model_name, gpu=use_cuda)
     
     logger.info(f"Synthesizing speech for text: {text[:50]}...")
     
-    if speaker_wav and os.path.exists(speaker_wav):
-        # Voice cloning mode
-        logger.info(f"Using voice cloning with speaker: {speaker_wav}")
+    if speaker_wav:
+        # Voice conversion mode using FreeVC - speaker_wav is validated to exist above
+        logger.info(f"Using FreeVC voice conversion with speaker: {speaker_wav}")
+        logger.info("Note: This converts voice to match reference speaker (may lose trained patterns)")
         tts.tts_with_vc_to_file(
             text=text,
             speaker_wav=speaker_wav,
             file_path=output_path
         )
     else:
-        # Standard TTS mode
+        # Standard TTS mode - uses model's native trained voice
+        logger.info("Using model's native voice (no voice conversion)")
         tts.tts_to_file(text=text, file_path=output_path)
     
     logger.info(f"Audio saved to: {output_path}")
@@ -153,13 +248,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Basic usage with male voice
+    # Basic usage with male voice (uses pre-trained coqui-ai model)
     python bangla_tts.py --text "আমার সোনার বাংলা" --output output.wav
 
     # Use female voice
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
 
-    # Voice cloning
+    # Using custom local model weights (RECOMMENDED for trained models)
+    # This preserves your model's trained voice and speech patterns
+    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
+
+    # Voice conversion with FreeVC (converts to match reference speaker)
+    # WARNING: This may lose trained speech patterns from custom models
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output cloned.wav
 
     # Force CPU usage
@@ -195,7 +295,19 @@ Examples:
         "--voice-clone", "-vc",
         type=str,
         dest="speaker_wav",
-        help="Path to speaker audio file for voice cloning"
+        help="Path to speaker audio for FreeVC voice conversion. WARNING: This converts voice to match reference speaker and may lose trained speech patterns from custom models"
+    )
+    
+    parser.add_argument(
+        "--model-path", "-m",
+        type=str,
+        help="Path to custom model checkpoint file. Uses trained voice/speech patterns directly"
+    )
+    
+    parser.add_argument(
+        "--config-path", "-c",
+        type=str,
+        help="Path to custom model config file (required when using --model-path)"
     )
     
     parser.add_argument(
@@ -236,13 +348,21 @@ Examples:
     if not args.text:
         parser.error("--text is required for speech synthesis")
     
+    # Validate model path and config path
+    if args.model_path and not args.config_path:
+        parser.error("--config-path is required when using --model-path")
+    if args.config_path and not args.model_path:
+        parser.error("--model-path is required when using --config-path")
+    
     # Run synthesis
     synthesize_speech(
         text=args.text,
         output_path=args.output,
         voice=args.voice,
         speaker_wav=args.speaker_wav,
-        use_gpu=not args.no_gpu
+        use_gpu=not args.no_gpu,
+        model_path=args.model_path,
+        config_path=args.config_path
     )
 
 

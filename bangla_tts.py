@@ -9,6 +9,9 @@ Usage:
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice male --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output output.wav
+    
+    # Using custom local model weights (for phoneme-based VITS model)
+    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
 """
 
 import argparse
@@ -84,7 +87,9 @@ def synthesize_speech(
     output_path: str = "output.wav",
     voice: str = "male",
     speaker_wav: str = None,
-    use_gpu: bool = True
+    use_gpu: bool = True,
+    model_path: str = None,
+    config_path: str = None
 ):
     """
     Synthesize speech from Bangla text.
@@ -92,9 +97,11 @@ def synthesize_speech(
     Args:
         text: Bangla text to convert to speech
         output_path: Path to save the output audio file
-        voice: Voice type ('male' or 'female')
+        voice: Voice type ('male' or 'female') - used only when model_path is not provided
         speaker_wav: Path to speaker audio for voice cloning (optional)
         use_gpu: Whether to use GPU acceleration
+        model_path: Path to custom model checkpoint file (optional)
+        config_path: Path to custom model config file (optional)
     
     Returns:
         Path to the generated audio file
@@ -116,21 +123,39 @@ def synthesize_speech(
     # Determine if we should use GPU
     use_cuda = use_gpu and torch.cuda.is_available()
     
-    # Get model name
-    models = get_available_models()
-    if voice not in models:
-        logger.error(f"Invalid voice '{voice}'. Available voices: {list(models.keys())}")
-        sys.exit(1)
+    # Check if speaker_wav is requested but doesn't exist
+    if speaker_wav and not os.path.exists(speaker_wav):
+        logger.warning(f"Speaker wav file not found: {speaker_wav}")
+        logger.warning("Voice cloning will be disabled. Falling back to standard TTS.")
+        speaker_wav = None
     
-    model_name = models[voice]
-    logger.info(f"Loading TTS model: {model_name}")
-    
-    # Initialize TTS with GPU support if available
-    tts = TTS(model_name=model_name, gpu=use_cuda)
+    # Load TTS model
+    if model_path and config_path:
+        # Use custom local model weights
+        if not os.path.exists(model_path):
+            logger.error(f"Model checkpoint file not found: {model_path}")
+            sys.exit(1)
+        if not os.path.exists(config_path):
+            logger.error(f"Model config file not found: {config_path}")
+            sys.exit(1)
+        
+        logger.info(f"Loading custom TTS model from: {model_path}")
+        logger.info(f"Using config: {config_path}")
+        tts = TTS(model_path=model_path, config_path=config_path, gpu=use_cuda)
+    else:
+        # Use pre-trained model from coqui-ai model zoo
+        models = get_available_models()
+        if voice not in models:
+            logger.error(f"Invalid voice '{voice}'. Available voices: {list(models.keys())}")
+            sys.exit(1)
+        
+        model_name = models[voice]
+        logger.info(f"Loading TTS model: {model_name}")
+        tts = TTS(model_name=model_name, gpu=use_cuda)
     
     logger.info(f"Synthesizing speech for text: {text[:50]}...")
     
-    if speaker_wav and os.path.exists(speaker_wav):
+    if speaker_wav:
         # Voice cloning mode
         logger.info(f"Using voice cloning with speaker: {speaker_wav}")
         tts.tts_with_vc_to_file(
@@ -159,8 +184,14 @@ Examples:
     # Use female voice
     python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
 
-    # Voice cloning
-    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone speaker.wav --output cloned.wav
+    # Voice cloning with target speaker
+    python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
+
+    # Using custom local model weights (e.g., phoneme-based VITS)
+    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
+
+    # Custom model with voice cloning
+    python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --voice-clone target_speaker_male.wav --output cloned.wav
 
     # Force CPU usage
     python bangla_tts.py --text "আমার সোনার বাংলা" --no-gpu --output output.wav
@@ -196,6 +227,18 @@ Examples:
         type=str,
         dest="speaker_wav",
         help="Path to speaker audio file for voice cloning"
+    )
+    
+    parser.add_argument(
+        "--model-path", "-m",
+        type=str,
+        help="Path to custom model checkpoint file (for loading local weights)"
+    )
+    
+    parser.add_argument(
+        "--config-path", "-c",
+        type=str,
+        help="Path to custom model config file (required when using --model-path)"
     )
     
     parser.add_argument(
@@ -236,13 +279,21 @@ Examples:
     if not args.text:
         parser.error("--text is required for speech synthesis")
     
+    # Validate model path and config path
+    if args.model_path and not args.config_path:
+        parser.error("--config-path is required when using --model-path")
+    if args.config_path and not args.model_path:
+        parser.error("--model-path is required when using --config-path")
+    
     # Run synthesis
     synthesize_speech(
         text=args.text,
         output_path=args.output,
         voice=args.voice,
         speaker_wav=args.speaker_wav,
-        use_gpu=not args.no_gpu
+        use_gpu=not args.no_gpu,
+        model_path=args.model_path,
+        config_path=args.config_path
     )
 
 

@@ -39,12 +39,26 @@ python bangla_tts.py --text "আমার সোনার বাংলা, আ�
 # Synthesize speech with female voice
 python bangla_tts.py --text "আমার সোনার বাংলা" --voice female --output output.wav
 
-# Voice cloning
+# Voice cloning with target speaker audio
 python bangla_tts.py --text "আমার সোনার বাংলা" --voice-clone target_speaker_male.wav --output cloned.wav
 
 # List available models
 python bangla_tts.py --list-models
 ```
+
+### Using Custom Local Model Weights
+
+If you have custom trained model weights (e.g., phoneme-based VITS model from Kaggle), you can load them directly:
+
+```bash
+# Using custom model checkpoint and config
+python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --output output.wav
+
+# Custom model with voice cloning
+python bangla_tts.py --text "আমার নাম কি" --model-path checkpoint.pth --config-path config.json --voice-clone target_speaker_male.wav --output cloned.wav
+```
+
+**Note:** Custom model weights can be downloaded from [Kaggle](https://www.kaggle.com/datasets/mobassir/comprehensive-bangla-tts).
 
 ### Python API Usage
 
@@ -54,11 +68,29 @@ from bangla_tts import synthesize_speech, check_gpu_availability
 # Check GPU
 device = check_gpu_availability()
 
-# Synthesize speech
+# Synthesize speech (using pre-trained model from coqui-ai)
 synthesize_speech(
     text="আমার সোনার বাংলা, আমি তোমায় ভালোবাসি",
     output_path="output.wav",
     voice="male",
+    use_gpu=True
+)
+
+# Synthesize speech with voice cloning
+synthesize_speech(
+    text="আমার সোনার বাংলা",
+    output_path="cloned.wav",
+    voice="male",
+    speaker_wav="target_speaker_male.wav",
+    use_gpu=True
+)
+
+# Synthesize speech with custom local model weights
+synthesize_speech(
+    text="আমার নাম কি",
+    output_path="output.wav",
+    model_path="checkpoint.pth",
+    config_path="config.json",
     use_gpu=True
 )
 ```

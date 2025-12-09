@@ -123,11 +123,11 @@ def synthesize_speech(
     # Determine if we should use GPU
     use_cuda = use_gpu and torch.cuda.is_available()
     
-    # Check if speaker_wav is requested but doesn't exist
+    # Validate speaker_wav if provided
     if speaker_wav and not os.path.exists(speaker_wav):
-        logger.warning(f"Speaker wav file not found: {speaker_wav}")
-        logger.warning("Voice cloning will be disabled. Falling back to standard TTS.")
-        speaker_wav = None
+        logger.error(f"Speaker wav file not found: {speaker_wav}")
+        logger.error("Please provide a valid path to the speaker audio file for voice cloning.")
+        sys.exit(1)
     
     # Load TTS model
     if model_path and config_path:
@@ -156,7 +156,7 @@ def synthesize_speech(
     logger.info(f"Synthesizing speech for text: {text[:50]}...")
     
     if speaker_wav:
-        # Voice cloning mode
+        # Voice cloning mode - speaker_wav is validated to exist above
         logger.info(f"Using voice cloning with speaker: {speaker_wav}")
         tts.tts_with_vc_to_file(
             text=text,
